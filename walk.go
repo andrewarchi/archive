@@ -92,7 +92,8 @@ func walkReader(r io.Reader, filename string, walk WalkFunc) error {
 	panic(fmt.Errorf("no archive extension: %s", filename))
 }
 
-// splitExt splits the filename into recognized extensions.
+// splitExt splits a filename with compound extensions into recognized
+// extensions.
 func splitExt(filename string) ([]string, error) {
 	name := filename
 	var exts []string
