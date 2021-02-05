@@ -9,18 +9,41 @@ package archive
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"io"
+	"strings"
 )
 
 type mockFile struct {
-	Name string
-	Body []byte
+	Name, Body string
 }
 
-func makeTar(files []mockFile) ([]byte, error) {
-	var b bytes.Buffer
-	tw := tar.NewWriter(&b)
+var testFiles = []mockFile{
+	{".git/HEAD", "ref: refs/heads/main\n"},
+	{"cmd/hello/main.go", "package main\n\nimport \"fmt\"\n\nfunc hello() {\n\tfmt.Println(\"Hallo Welt!\")\n}\n\nfunc main() {\n\thello()\n}\n"},
+	{"cmd/hello/main_test.go", "package main\n\nfunc TestHello(t *testing.T) {\n\tif h := hello(); h != \"Hallo Welt!\" {\n\t\tt.Error(\"bad salutation\")\n\t}\n}\n"},
+	{"README.md", "# Project\n\nHello, World!\n"},
+	{"LICENSE", "Copyright (c) 2021 Acme Corp.\n"},
+	{"go.mod", "module example.com/hello\n\ngo1.16"},
+}
+
+func makeZip(w io.Writer, files []mockFile) error {
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	for _, f := range files {
+		fw, err := zw.Create(f.Name)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fw, strings.NewReader(f.Body)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func makeTar(w io.Writer, files []mockFile) error {
+	tw := tar.NewWriter(w)
+	defer tw.Close()
 	for _, f := range files {
 		h := &tar.Header{
 			Name:     f.Name,
@@ -29,27 +52,11 @@ func makeTar(files []mockFile) ([]byte, error) {
 			Size:     int64(len(f.Body)),
 		}
 		if err := tw.WriteHeader(h); err != nil {
-			return nil, err
+			return err
 		}
-		if _, err := io.Copy(tw, bytes.NewReader(f.Body)); err != nil {
-			return nil, err
-		}
-	}
-	tw.Close()
-	return b.Bytes(), nil
-}
-
-func makeZip(files []mockFile) ([]byte, error) {
-	var b bytes.Buffer
-	zw := zip.NewWriter(&b)
-	for _, f := range files {
-		fw, err := zw.Create(f.Name)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := io.Copy(fw, bytes.NewReader(f.Body)); err != nil {
-			return nil, err
+		if _, err := io.Copy(tw, strings.NewReader(f.Body)); err != nil {
+			return err
 		}
 	}
-	return b.Bytes(), nil
+	return nil
 }
