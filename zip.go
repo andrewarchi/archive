@@ -10,7 +10,46 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"os"
 )
+
+type zipFile struct {
+	f *zip.File
+}
+
+func (zf zipFile) Name() string                 { return zf.f.Name }
+func (zf zipFile) Open() (io.ReadCloser, error) { return zf.f.Open() }
+func (zf zipFile) FileInfo() os.FileInfo        { return zf.f.FileInfo() }
+
+func walkZip(zr *zip.Reader, filename string, walk WalkFunc) error {
+	for _, f := range zr.File {
+		if err := walk(zipFile{f}); err != nil {
+			return fmt.Errorf("archive: walk %s:%s: %w", filename, f.Name, err)
+		}
+	}
+	return nil
+}
+
+// WalkZip traverses a ZIP archive from an io.ReaderAt and executes the
+// given walk function on each file.
+func WalkZip(r io.ReaderAt, size int64, filename string, walk WalkFunc) error {
+	zr, err := zip.NewReader(r, size)
+	if err != nil {
+		return err
+	}
+	return walkZip(zr, filename, walk)
+}
+
+// WalkZipFile traverses a ZIP archive from a file and executes the
+// given walk function on each file.
+func WalkZipFile(filename string, walk WalkFunc) error {
+	zr, err := zip.OpenReader(filename)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	return walkZip(&zr.Reader, filename, walk)
+}
 
 // OpenSingleFileZip opens a zip containing a single file for reading
 // and returns the filename of the contained file.
@@ -26,19 +65,19 @@ func OpenSingleFileZip(filename string) (io.ReadCloser, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return &singleFileZip{zr, f}, zr.File[0].Name, nil
+	return &singleFileZipReader{zr, f}, zr.File[0].Name, nil
 }
 
-type singleFileZip struct {
+type singleFileZipReader struct {
 	zr *zip.ReadCloser
 	f  io.ReadCloser
 }
 
-func (z *singleFileZip) Read(p []byte) (n int, err error) {
+func (z *singleFileZipReader) Read(p []byte) (n int, err error) {
 	return z.f.Read(p)
 }
 
-func (z *singleFileZip) Close() error {
+func (z *singleFileZipReader) Close() error {
 	err1 := z.f.Close()
 	err2 := z.zr.Close()
 	if err1 != nil {
