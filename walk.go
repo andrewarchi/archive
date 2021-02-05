@@ -5,11 +5,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 // Package archive contains traversal utilities for ZIP and tar
-// archives with gzip, XZ, and LZ4 compression.
+// archives with gzip, bzip2, xz, and LZ4 compression.
 package archive
 
 import (
 	"bytes"
+	"compress/bzip2"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -35,14 +36,14 @@ type WalkFunc func(File) error
 
 // Walk traverses an archive from an io.Reader and executes the given
 // walk function on each file. Supported archive and compression
-// formats: ZIP, tar, gzip, XZ, and LZ4.
+// formats: ZIP, tar, gzip, bzip2, xz, and LZ4.
 func Walk(r io.Reader, filename string, walk WalkFunc) error {
 	return walkReader(r, filename, walk)
 }
 
 // WalkFile traverses an archive from a file and executes the given walk
 // function on each file. Supported archive and compression formats:
-// ZIP, tar, gzip, XZ, and LZ4.
+// ZIP, tar, gzip, bzip2, xz, and LZ4.
 func WalkFile(filename string, walk WalkFunc) error {
 	if strings.HasSuffix(filename, ".zip") {
 		return WalkZipFile(filename, walk)
@@ -77,6 +78,8 @@ func walkReader(r io.Reader, filename string, walk WalkFunc) error {
 			}
 			defer gr.Close()
 			r = gr
+		case "bz2":
+			r = bzip2.NewReader(r)
 		case "xz":
 			xr, err := xz.NewReader(r)
 			if err != nil {
@@ -86,10 +89,10 @@ func walkReader(r io.Reader, filename string, walk WalkFunc) error {
 		case "lz4":
 			r = lz4.NewReader(r)
 		default:
-			panic(fmt.Errorf("unsupported extension: %q", ext))
+			return fmt.Errorf("archive: unsupported format: %q", ext)
 		}
 	}
-	panic(fmt.Errorf("no archive extension: %s", filename))
+	return fmt.Errorf("archive: no archive extension: %s", filename)
 }
 
 // splitExt splits a filename with compound extensions into recognized
@@ -101,9 +104,9 @@ func splitExt(filename string) ([]string, error) {
 		switch ext := filepath.Ext(name); ext {
 		case ".zip", ".tar":
 			return append(exts, ext[1:]), nil
-		case ".tgz", ".txz":
+		case ".tgz", ".tbz2", ".txz":
 			return append(exts, ext[2:], "tar"), nil
-		case ".gz", ".xz", ".lz4":
+		case ".gz", ".bz2", ".xz", ".lz4":
 			exts = append(exts, ext[1:])
 			name = name[:len(name)-len(ext)]
 		case "":

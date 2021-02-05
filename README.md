@@ -1,7 +1,7 @@
 # archive
 
 Package archive contains traversal utilities for ZIP and tar archives
-with gzip, XZ, and LZ4 compression.
+with gzip, bzip2, xz, and LZ4 compression.
 
 Clients include
 [andrewarchi/browser](https://github.com/andrewarchi/browser) and
