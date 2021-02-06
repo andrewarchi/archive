@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -30,6 +28,27 @@ func walkZip(zr *zip.Reader, filename string, walk WalkFunc) error {
 		if err := walk(zipFile{f}); err != nil {
 			return fmt.Errorf("archive: walk %s:%s: %w", filename, f.Name, err)
 		}
+	}
+	return nil
+}
+
+func walkZipConcurrent(zr *zip.Reader, filename string, walk WalkFunc) error {
+	var wg sync.WaitGroup
+	errs := make(chan error, len(zr.File))
+	for _, f := range zr.File {
+		wg.Add(1)
+		func(f *zip.File) {
+			if err := walk(zipFile{f}); err != nil {
+				errs <- fmt.Errorf("%s:%s: %w", filename, f.Name, err)
+				return
+			}
+			wg.Done()
+		}(f)
+	}
+	wg.Wait()
+	close(errs)
+	if len(errs) != 0 {
+		return multiErrFromChan("archive: walk zip", errs)
 	}
 	return nil
 }
@@ -53,62 +72,6 @@ func WalkZipFile(filename string, walk WalkFunc) error {
 	}
 	defer zr.Close()
 	return walkZip(&zr.Reader, filename, walk)
-}
-
-func extractZip(r *zip.Reader, filename, dir string) error {
-	dir = filepath.Join(dir, filepath.Base(strings.TrimSuffix(filename, ".zip")))
-	var wg sync.WaitGroup
-	errs := make(chan error, len(r.File))
-	for _, f := range r.File {
-		wg.Add(1)
-		go func(f *zip.File) {
-			fr, err := f.Open()
-			if err != nil {
-				errs <- err
-				return
-			}
-			defer fr.Close()
-			out := filepath.Join(dir, f.Name)
-			if err := os.MkdirAll(filepath.Dir(out), 0700); err != nil {
-				errs <- err
-				return
-			}
-			fw, err := os.Create(out)
-			if err != nil {
-				errs <- err
-				return
-			}
-			defer fw.Close()
-			if _, err := io.Copy(fw, fr); err != nil {
-				errs <- err
-				return
-			}
-			wg.Done()
-		}(f)
-	}
-	wg.Wait()
-	close(errs)
-	if len(errs) != 0 {
-		return multiErrFromChan("archive: extract zip", errs)
-	}
-	return nil
-}
-
-func ExtractZip(r io.ReaderAt, size int64, filename, dir string) error {
-	zr, err := zip.NewReader(r, size)
-	if err != nil {
-		return err
-	}
-	return extractZip(zr, filename, dir)
-}
-
-func ExtractZipFile(filename, dir string) error {
-	zr, err := zip.OpenReader(filename)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	return extractZip(&zr.Reader, filename, dir)
 }
 
 // OpenSingleFileZip opens a zip containing a single file for reading
