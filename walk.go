@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/pierrec/lz4/v4"
-	"github.com/ulikunitz/xz"
 )
 
 // File exposes a common interface for files in an archive.
@@ -81,10 +80,11 @@ func walkReader(r io.Reader, filename string, walk WalkFunc) error {
 		case "bz2":
 			r = bzip2.NewReader(r)
 		case "xz":
-			xr, err := xz.NewReader(r)
+			xr, err := NewXZReader(r)
 			if err != nil {
 				return err
 			}
+			defer xr.Close()
 			r = xr
 		case "lz4":
 			r = lz4.NewReader(r)
