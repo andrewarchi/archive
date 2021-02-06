@@ -8,9 +8,13 @@ package archive
 
 import (
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 )
 
 type zipFile struct {
@@ -51,6 +55,62 @@ func WalkZipFile(filename string, walk WalkFunc) error {
 	return walkZip(&zr.Reader, filename, walk)
 }
 
+func extractZip(r *zip.Reader, filename, dir string) error {
+	dir = filepath.Join(dir, filepath.Base(strings.TrimSuffix(filename, ".zip")))
+	var wg sync.WaitGroup
+	errs := make(chan error, len(r.File))
+	for _, f := range r.File {
+		wg.Add(1)
+		go func(f *zip.File) {
+			fr, err := f.Open()
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer fr.Close()
+			out := filepath.Join(dir, f.Name)
+			if err := os.MkdirAll(filepath.Dir(out), 0700); err != nil {
+				errs <- err
+				return
+			}
+			fw, err := os.Create(out)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer fw.Close()
+			if _, err := io.Copy(fw, fr); err != nil {
+				errs <- err
+				return
+			}
+			wg.Done()
+		}(f)
+	}
+	wg.Wait()
+	close(errs)
+	if len(errs) != 0 {
+		return multiErrFromChan("archive: extract zip", errs)
+	}
+	return nil
+}
+
+func ExtractZip(r io.ReaderAt, size int64, filename, dir string) error {
+	zr, err := zip.NewReader(r, size)
+	if err != nil {
+		return err
+	}
+	return extractZip(zr, filename, dir)
+}
+
+func ExtractZipFile(filename, dir string) error {
+	zr, err := zip.OpenReader(filename)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	return extractZip(&zr.Reader, filename, dir)
+}
+
 // OpenSingleFileZip opens a zip containing a single file for reading
 // and returns the filename of the contained file.
 func OpenSingleFileZip(filename string) (io.ReadCloser, string, error) {
@@ -84,4 +144,32 @@ func (z *singleFileZipReader) Close() error {
 		return err1
 	}
 	return err2
+}
+
+type multiError struct {
+	tag  string
+	errs []error
+}
+
+func (merr *multiError) Error() string {
+	if len(merr.errs) == 0 {
+		return merr.tag
+	}
+	if len(merr.errs) == 1 {
+		return fmt.Sprintf("%s: %s", merr.tag, merr.errs[0])
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "%s:\n", merr.tag)
+	for _, err := range merr.errs {
+		fmt.Fprintf(&b, "\t%s\n", err)
+	}
+	return b.String()
+}
+
+func multiErrFromChan(tag string, errs <-chan error) *multiError {
+	merr := &multiError{tag, make([]error, 0, len(errs))}
+	for err := range errs {
+		merr.errs = append(merr.errs, err)
+	}
+	return merr
 }
