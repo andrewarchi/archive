@@ -7,9 +7,12 @@
 package archive
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os/exec"
+	"strings"
 
 	"github.com/ulikunitz/xz"
 )
@@ -26,11 +29,16 @@ func NewXZReader(r io.Reader) (io.ReadCloser, error) {
 	}
 
 	rpipe, wpipe := io.Pipe()
+	var errb bytes.Buffer
 	cmd := exec.Command("xz", "--decompress", "--stdout")
 	cmd.Stdin = r
 	cmd.Stdout = wpipe
+	cmd.Stderr = &errb
 	go func() {
 		err := cmd.Run()
+		if err != nil && errb.Len() != 0 {
+			err = errors.New(strings.TrimRight(errb.String(), "\r\n"))
+		}
 		wpipe.CloseWithError(err)
 	}()
 	return rpipe, nil
