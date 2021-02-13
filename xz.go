@@ -11,10 +11,10 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"os/exec"
 	"strings"
 
 	"github.com/ulikunitz/xz"
+	exec "golang.org/x/sys/execabs"
 )
 
 // NewXZReader returns a reader that decompresses XZ data using system
